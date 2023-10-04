@@ -23,6 +23,13 @@ pub struct Args {
     #[arg(short, long, env = "DNSPOD_INTERVAL", default_value = "10", value_parser = clap::value_parser!(u64).range(5..=3600))]
     pub interval: u64,
 
+    /// check dns interval times, eg: 5
+    /// default: 5
+    /// min: 1
+    /// max: 20
+    #[arg(short, long, env = "DNSPOD_REFRESH", default_value = "5", value_parser = clap::value_parser!(u64).range(1..=20))]
+    pub refresh: u64,
+
     /// verbose log
     #[arg(long)]
     pub verbose: bool,

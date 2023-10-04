@@ -1,5 +1,7 @@
+#![feature(async_closure)]
 use crate::dnspod_api::{DnspodApi, Record};
 
+use std::error;
 use anyhow::Error;
 use chrono::Local;
 use clap::Parser;
@@ -16,11 +18,39 @@ async fn get_ip() -> Result<String, Error> {
         .text()
         .await?;
 
-    Ok(result.trim().to_owned())
+    let ip = result.trim().to_owned();
+    info!("get_my_ip: {}", ip);
+    Ok(ip)
+}
+
+async fn get_record(sub_domain: &str, api: &DnspodApi) -> Result<Record, Error> {
+    let record = api.get_record(sub_domain).await?;
+    match record {
+        Record::NotFound => {
+            error!("record not found");
+            return Err(anyhow::anyhow!("record({}) not found", sub_domain))
+        }
+        _ => {
+            info!("get_record: {} -> {}", sub_domain, record);
+            return Ok(record);
+        }
+    }
+}
+
+async fn get_record_id_value(sub_domain: &str, api: &DnspodApi) -> Result<(String, String), Error> {
+    let record = get_record(sub_domain, api).await?;
+    match record {
+        Record::A(id, value) => {
+            return Ok((id, value));
+        }
+        _ => {
+            return Ok(("".to_string(), "".to_string()));
+        }
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() {
+async fn main() -> Result<(), anyhow::Error>{
     let args = args::Args::parse();
 
     let mut level = log::LevelFilter::Info;
@@ -43,27 +73,11 @@ async fn main() {
         .init();
 
     let api = DnspodApi::new(args.token, args.domain);
-
-    let record = api.get_record(&args.sub_domain).await;
-
-    let mut record_id = "".to_string();
-    let mut record_value = "".to_string();
-
-    match record {
-        Ok(Record::A(id, value)) => {
-            record_id = id;
-            record_value = value;
-            info!("record: {}", record_value);
-        }
-        Ok(Record::NotFound) => {
-            error!("record not found");
-        }
-        Err(e) => {
-            error!("get record, {}", e);
-        }
-    }
-
     let mut interval = time::interval(Duration::from_secs(args.interval));
+    let mut record_id;
+    let mut record_value;
+    (record_id, record_value) = get_record_id_value(&args.sub_domain, &api).await?;
+    let mut times = 0;
 
     loop {
         interval.tick().await;
@@ -94,6 +108,12 @@ async fn main() {
                 warn!("get my ip: {:?}", e);
             }
         }
+
+        if times >= args.refresh {
+            (record_id, record_value) = get_record_id_value(&args.sub_domain, &api).await?;
+            times = 0;
+        }
+        times += 1;
     }
 }
 
